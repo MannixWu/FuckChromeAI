@@ -108,6 +108,9 @@ header {
 .meta button { color:var(--fg-faint); font-size:11.5px; }
 .meta button:hover { color:var(--fg); }
 .caret { display:inline-block; width:.44em; height:1.02em; background:var(--fg-dim); vertical-align:-.16em; margin-left:2px; animation:blink 1s steps(2) infinite; }
+.pending { display:flex; align-items:center; gap:9px; flex-wrap:wrap; color:var(--fg-dim); font-size:13.5px; }
+.pending b { font-weight:500; }
+.pend-t { color:var(--fg-faint); font-size:12px; }
 @keyframes blink { 50% { opacity:0; } }
 
 /* markdown */
@@ -365,6 +368,14 @@ function withCaret(html) {
   const m = TAIL_BLOCK.exec(html);
   if (!m) return html + CARET;
   return html.slice(0, m.index) + CARET + html.slice(m.index);
+}
+
+/* 静默期不能只有一个光标：建会话 6s + 等首字 9s 看起来跟死机没区别，
+   把「在等什么、等了多久」写出来。文案只描述真实阶段，不编进度。 */
+function pendingHtml(m) {
+  const sec = Math.max(0, Math.round((now() - (m.startedAt || now())) / 1000));
+  return `<div class="pending"><span class="caret"></span><b>${m.status || '正在准备'}</b>` +
+    `<span class="pend-t">已等 ${sec}s · 全程跑在你这台机器的 CPU 上</span></div>`;
 }
 
 /* 粗粒度 token 估算：CJK 约 1 字/token，其余约 3.6 字符/token */
@@ -638,7 +649,7 @@ class ChromeBackend {
   /* messages = 完整消息数组，最后一条是内容为空的助手占位（本轮要生成的回答）
      会话里应当已有 messages[0..-3]；本轮把 messages[-2] 交给 prompt，
      成功后会话即等于 messages[0..-2] + 新回答，据此更新 mirroredIds */
-  async stream({ messages, settings, onDelta, signal }) {
+  async stream({ messages, settings, onDelta, onStatus, signal }) {
     if (!this.LM) throw new Error('当前浏览器未暴露 LanguageModel API');
     const sysMsg = settings.system ? { role: 'system', content: settings.system } : null;
     const qMsg = messages[messages.length - 2];
@@ -649,21 +660,34 @@ class ChromeBackend {
     if (signal) { if (signal.aborted) onOuterAbort(); else signal.addEventListener('abort', onOuterAbort, { once: true }); }
 
     const attempt = async () => {
-      const use = await this._syncSession(messages.slice(0, -2), sysMsg, settings.ctxBudget, this._abort.signal);
-      const callOpts = { signal: this._abort.signal, temperature: settings.temperature, maxTokens: settings.maxTokens };
-      let text = '';
-      if (this.mode === 'messages') {
-        for await (const chunk of this.session.promptStreaming([{ role: 'user', content: question }], callOpts)) {
-          text += typeof chunk === 'string' ? chunk : (chunk && chunk.content) || '';
-          onDelta(text);
-        }
-        this.mirroredIds = messages.slice(0, -1).map((m) => m.id);
-      } else {
-        for await (const chunk of this.session.promptStreaming(this._transcript(use, question), callOpts)) {
-          text += typeof chunk === 'string' ? chunk : (chunk && chunk.content) || '';
-          onDelta(text);
-        }
+      const t0 = performance.now();
+      const hist = messages.slice(0, -2);
+      if (onStatus) {
+        const prefixOk = this.mode === 'messages' && this.session &&
+          this.mirroredIds.length <= hist.length && this.mirroredIds.every((id, i) => hist[i].id === id);
+        onStatus(prefixOk ? '正在把本轮追加进会话' : `正在新建会话并喂入 ${hist.length} 条历史（这一步最慢）`);
       }
+      const use = await this._syncSession(messages.slice(0, -2), sysMsg, settings.ctxBudget, this._abort.signal);
+      const syncMs = performance.now() - t0;
+      if (onStatus) onStatus('会话就绪，等它吐第一个字');
+      const callOpts = { signal: this._abort.signal, temperature: settings.temperature, maxTokens: settings.maxTokens };
+      const iter = this.mode === 'messages'
+        ? this.session.promptStreaming([{ role: 'user', content: question }], callOpts)
+        : this.session.promptStreaming(this._transcript(use, question), callOpts);
+      let text = '', chunks = 0, firstMs = 0, maxGap = 0, prev = performance.now();
+      for await (const chunk of iter) {
+        const t = performance.now();
+        if (!chunks) { firstMs = t - prev; if (onStatus) onStatus(null); }
+        else if (t - prev > maxGap) maxGap = t - prev;
+        prev = t; chunks++;
+        text += typeof chunk === 'string' ? chunk : (chunk && chunk.content) || '';
+        onDelta(text);
+      }
+      if (this.mode === 'messages') this.mirroredIds = messages.slice(0, -1).map((m) => m.id);
+      /* 长输出「卡死」的三类嫌疑分别对应这三段：会话同步耗时 / 首字等待 / chunk 之间的最长空档 */
+      console.info(`[fca] 流式统计 mode=${this.mode} chunks=${chunks} 同步会话=${Math.round(syncMs)}ms ` +
+        `首字=${Math.round(firstMs)}ms 最长空档=${Math.round(maxGap)}ms 生成=${Math.round(prev - t0 - syncMs)}ms ` +
+        `字数=${text.length} 上限=${settings.maxTokens}tok 省略=${this.trimmed}`);
       console.info('[fca] turn ok mode=' + this.mode + ' 会话内已同步=' + this.mirroredIds.length + ' 省略=' + this.trimmed);
       return text;
     };
@@ -802,6 +826,11 @@ function renderSidebar() {
   });
 }
 
+/* 流式期间这一条气泡该显示什么：有字就渲染 markdown，没字就显示等待状态 */
+function streamBodyHtml(m) {
+  return m.content ? withCaret(MD.render(m.content)) : pendingHtml(m);
+}
+
 function msgNode(m, isLast, streaming) {
   const wrap = document.createElement('div');
   wrap.className = 'msg ' + m.role + (m.error ? ' err' : '');
@@ -814,7 +843,7 @@ function msgNode(m, isLast, streaming) {
   const body = document.createElement('div');
   body.className = 'body';
   if (m.role === 'user') body.textContent = m.content;
-  else body.innerHTML = streaming ? withCaret(MD.render(m.content)) : MD.render(m.content);
+  else body.innerHTML = streaming ? streamBodyHtml(m) : MD.render(m.content);
   wrap.append(body);
 
   if (m.role === 'assistant' && !streaming) {
@@ -858,6 +887,18 @@ function renderThread(streamingMid = null) {
 function scrollToBottom(force) {
   const th = $('thread');
   if (force || App.pinned) th.scrollTop = th.scrollHeight;
+}
+
+/* 主线程看门狗：200ms 心跳，被占住超过 300ms 就说明界面此刻真的点不动 */
+function startJankWatch() {
+  let prev = performance.now();
+  const id = setInterval(() => {
+    const t = performance.now();
+    const blocked = t - prev - 200;
+    if (blocked > 300) console.warn(`[fca] 主线程被占住 ${Math.round(blocked)}ms（界面此刻无响应）`);
+    prev = t;
+  }, 200);
+  return () => clearInterval(id);
 }
 
 function updatePill() {
@@ -933,7 +974,7 @@ function scheduleStreamRender(mid) {
     const c = activeConv(); if (!c) return;
     const m = c.messages.find((x) => x.id === mid); if (!m) return;
     const node = $('messages').querySelector(`[data-mid="${mid}"] .body`);
-    if (node) node.innerHTML = withCaret(MD.render(m.content));
+    if (node) node.innerHTML = streamBodyHtml(m);
     else renderThread(mid);
     scrollToBottom();
   });
@@ -968,7 +1009,11 @@ async function send(text) {
   $('input').value = ''; autoGrow();
   App.streaming = true; App.abort = new AbortController();
   App.pinned = true;
+  const stopJank = startJankWatch();
   const t0 = now();
+  reply.startedAt = t0;
+  /* 静默期每秒刷一次状态行，让「已等 Ns」真的在走 */
+  const tick = setInterval(() => { if (App.streaming && !reply.content) scheduleStreamRender(reply.id); }, 1000);
   renderSidebar(); renderThread(reply.id); persist(); refreshSendState(); scrollToBottom(true);
 
   try {
@@ -976,6 +1021,7 @@ async function send(text) {
       messages: c.messages,
       settings: App.settings,
       onDelta: (full) => { reply.content = full; scheduleStreamRender(reply.id); },
+      onStatus: (label) => { reply.status = label; if (!reply.content) scheduleStreamRender(reply.id); },
       signal: App.abort.signal,
     });
     reply.ms = now() - t0;
@@ -994,6 +1040,7 @@ async function send(text) {
     reply.ms = now() - t0;
   } finally {
     App.streaming = false; App.abort = null;
+    stopJank(); clearInterval(tick); reply.status = null;
     if (App.raf) { cancelAnimationFrame(App.raf); App.raf = 0; }
     $('kvTime').textContent = ((now() - t0) / 1000).toFixed(1) + 's';
     renderThread(); persist(); refreshSendState(); updatePill(); scrollToBottom();
