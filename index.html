@@ -417,13 +417,17 @@ const MD = (() => {
 
   function render(src) {
     const lines = String(src || '').split('\n');
-    let out = '', i = 0, para = [];
+    let out = '', i = 0, para = [], guard = 0;
+    /* 解析器跑在模型输出的每一帧上：任何分支忘了推进 i 就是整页无响应。
+       这个上限把「死循环」降级成「截断渲染」，宁可少画一段也不能把标签页打死。 */
+    const CAP = Math.max(2000, lines.length * 4);
     const flushPara = () => {
       if (!para.length) return;
       out += `<p>${para.map(inline).join('<br>')}</p>`;
       para = [];
     };
     while (i < lines.length) {
+      if (++guard > CAP) { console.error('[fca] markdown 解析迭代超限，已截断输出'); flushPara(); break; }
       const line = lines[i];
 
       // 围栏代码块（流式时未闭合也照样输出）
@@ -456,7 +460,9 @@ const MD = (() => {
         flushPara(); const items = [];
         while (i < lines.length && ul.test(lines[i])) {
           let text = lines[i].replace(ul, ''); i++;
-          while (i < lines.length && lines[i].match(/^\s{2,}\S/) && !ul.test(lines[i])) text += ' ' + lines[i].trim();
+          /* 续行合并：缩进两格以上且不是新列表项的行并入当前条目。
+             这里必须推进 i —— 少一个 i++ 就是死循环，整页无响应。 */
+          while (i < lines.length && lines[i].match(/^\s{2,}\S/) && !ul.test(lines[i])) { text += ' ' + lines[i].trim(); i++; }
           items.push(text);
         }
         out += `<ul>${items.map((t) => `<li>${inline(esc(t))}</li>`).join('')}</ul>`;
