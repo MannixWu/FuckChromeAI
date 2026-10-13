@@ -2,7 +2,7 @@
 <html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='%2310a37f'/><text x='50' y='68' font-size='56' text-anchor='middle' fill='white' font-family='sans-serif'>本</text></svg>">
 <title>FUCK GOOGLE · 自愿安装</title>
 <style>
@@ -61,7 +61,7 @@ textarea, input { font:inherit; color:inherit; }
 .side-foot button { padding:6px 10px; border-radius:8px; border:1px solid var(--line); }
 .side-foot button:hover { background:var(--bg-hover); }
 
-main { flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
+main { flex:1; display:flex; flex-direction:column; min-width:0; position:relative; overflow:hidden; }
 header {
   height:52px; flex:0 0 52px; display:flex; align-items:center; gap:10px; padding:0 14px;
   border-bottom:1px solid var(--line); background:var(--bg);
@@ -86,12 +86,6 @@ header {
 #notice.show { display:block; }
 #notice b { color:var(--fg); }
 #notice code { background:var(--bg-code); padding:1px 5px; border-radius:5px; font-size:12px; color:var(--fg); }
-#notice .steps { margin-top:10px; line-height:2; }
-#notice .row { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
-#notice .row button { padding:6px 12px; border:1px solid var(--line-strong); border-radius:8px; font-size:13px; }
-#notice .row button:hover { background:var(--bg-hover); }
-#progress { height:4px; border-radius:2px; background:var(--line); margin-top:10px; overflow:hidden; display:none; }
-#progress i { display:block; height:100%; width:0; background:var(--accent); transition:width .3s; }
 
 /* ---------- 消息流 ---------- */
 #thread { flex:1; overflow-y:auto; position:relative; scroll-behavior:smooth; }
@@ -213,13 +207,106 @@ pre.block code { display:block; padding:12px 14px; overflow-x:auto; background:n
 .iconact:hover { color:var(--fg); background:var(--bg-hover); }
 .iconact svg { width:14px; height:14px; }
 
+/* ---------- 不支持时的全屏「恭喜」页 ----------
+   body 默认带 .gated：#app 压根不入镜，检测出 available 才解锁。
+   这一页是静态 HTML + CSS，JS 挂掉时用户看到的仍然是它，而不是白屏。 */
+body.gated { overflow:hidden; }
+body.gated #app { display:none !important; }
+#gate { display:none; }
+body.gated #gate { display:block; }
+#gate {
+  position:fixed; inset:0; overflow-y:auto; -webkit-overflow-scrolling:touch;
+  background:var(--bg); color:var(--fg);
+  padding:calc(26px + env(safe-area-inset-top)) 18px calc(34px + env(safe-area-inset-bottom));
+  -webkit-text-size-adjust:100%; text-size-adjust:100%;
+}
+#gate .card { max-width:660px; margin:0 auto; }
+#gate .badge {
+  width:42px; height:42px; border-radius:50%; background:var(--bg-active); color:var(--accent);
+  display:grid; place-items:center; font-weight:800; font-size:22px; font-family:Georgia,"Times New Roman",serif;
+}
+#gate h1 { font-size:clamp(23px,6.4vw,33px); line-height:1.28; margin:16px 0 10px; letter-spacing:-.01em; }
+#gate .sub { color:var(--fg-dim); font-size:clamp(14px,3.6vw,15.5px); margin:0 0 18px; }
+#gate .state {
+  display:flex; align-items:center; gap:9px; flex-wrap:wrap; padding:12px 14px; margin:0 0 14px;
+  border:1px solid var(--line); border-radius:12px; background:var(--bg-side); font-size:14px;
+}
+#gate .state b { font-weight:600; }
+#gate .why { color:var(--fg-dim); font-size:14px; margin:0 0 18px; }
+#gate .why code, #gate .b-block code {
+  background:var(--bg-code); padding:1px 5px; border-radius:5px; font-size:12px; color:var(--fg);
+  overflow-wrap:anywhere; word-break:break-all;      /* 那两个 flag 名很长，别把版面撑出横向滚动 */
+}
+#gate .prog { height:5px; border-radius:3px; background:var(--line); overflow:hidden; margin:0 0 16px; display:none; }
+#gate .prog i { display:block; height:100%; width:0; background:var(--accent); transition:width .3s; }
+#gate .b-block { border:1px solid var(--line); border-radius:14px; background:var(--bg-side); padding:16px 18px; margin:0 0 16px; }
+#gate h2 { font-size:15.5px; margin:0 0 10px; }
+#gate ol { margin:0; padding-left:22px; color:var(--fg-dim); font-size:14px; line-height:2; }
+#gate p.note, #gate p.src { font-size:12.5px; color:var(--fg-faint); line-height:1.8; margin:12px 0 0; }
+#gate p.src a { color:var(--accent); text-decoration:none; border-bottom:1px solid var(--line-strong); overflow-wrap:anywhere; }
+#gate blockquote { margin:10px 0 0; padding:10px 12px; border-left:3px solid var(--line-strong); background:var(--bg-code); color:var(--fg-dim); font-size:13.5px; line-height:1.8; border-radius:0 8px 8px 0; }
+#gate .actions { display:flex; flex-direction:column; gap:10px; margin:22px 0 0; }
+#gate button {
+  min-height:46px; padding:12px 16px; border-radius:12px; border:1px solid var(--line-strong);
+  background:var(--bg-input); font-size:14.5px; text-align:center; touch-action:manipulation;
+}
+#gate button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+#gate button.link { background:none; border:0; color:var(--fg-dim); font-size:13.5px; min-height:40px; text-decoration:underline; text-underline-offset:3px; }
+#gate .foot { font-size:12px; color:var(--fg-faint); text-align:center; margin:22px 0 0; line-height:1.8; }
+#app.unlock { animation:fadein .35s ease both; }
+@keyframes fadein { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+@media (min-width:640px) { #gate .actions { flex-direction:row; flex-wrap:wrap; } #gate button { flex:1 1 240px; } #gate button.link { flex:1 1 100%; } }
+
 @media (max-width:720px) {
   #sidebar { position:absolute; z-index:30; height:100%; box-shadow:var(--shadow); }
   #messages { padding:16px 14px 8px; }
 }
 </style>
 </head>
-<body>
+<body class="gated">
+<!-- 不支持就别让原界面露脸：这一整页静态存在，JS 只负责填状态、切平台分支、解锁 -->
+<div id="gate">
+  <div class="card">
+    <div class="badge">G</div>
+    <h1>恭喜，这次它没能塞进来</h1>
+    <p class="sub">这台设备上没有一个几百 MB 的模型是在你没点头的情况下落地的。这种事换作别家会开弹窗、发公告、请你点「稍后」—— Google 的选择是干脆不提。你现在看到的这一屏，就是它没做到的那部分。</p>
+
+    <div class="state"><span class="dot" id="gateDot"></span><b id="gateStateText">正在看你硬盘上有什么…</b></div>
+    <p class="why" id="gateWhy"></p>
+    <div class="prog" id="gateProg"><i></i></div>
+
+    <div class="b-block" id="gateDesktop">
+      <h2>想被塞满的话，三步</h2>
+      <ol>
+        <li>地址栏打开 <code>chrome://flags</code></li>
+        <li>把 <code>#optimization-guide-on-device-model</code> 和 <code>#prompt-api-for-gemini-nano</code> 都设为 <b>Enabled</b></li>
+        <li>重启 Chrome；模型随后自动下载，这一页会自己让开</li>
+      </ol>
+      <p class="note">门槛（Google 文档写的，不是我编的）：桌面版 Chrome 138+；存放 Chrome 个人资料的那个卷至少 22 GB 可用空间；下载完之后可用空间跌破 10 GB，它会把模型删掉，等空间够了再自己重下。企业策略 <code>BuiltInAIDisallowed</code> 能把整台机器的这条路直接焊死。查模型实际多大、下到哪儿了：<code>chrome://on-device-internals</code>。</p>
+      <p class="note">顺便一条实打实的数据：调用这个 API 时 Chrome 自己在控制台列出的「受支持输出语言」是 <code>de / en / es / fr / ja</code> —— 没有中文。它照样能用中文给你写两千字（本项目实测如此），只是中文从来不在它保证质量的那份名单上。</p>
+      <p class="src">出处：<a href="https://developer.chrome.com/docs/ai/prompt-api" target="_blank" rel="noopener">developer.chrome.com/docs/ai/prompt-api</a></p>
+    </div>
+
+    <div class="b-block" id="gateMobile" hidden>
+      <h2>为什么手机上看不到它</h2>
+      <p class="why">不是你配置错了，也不是机型不够好。Google 自己的文档原话：</p>
+      <blockquote>非 Chromebook Plus 设备上的 Android 版 Chrome、iOS 版 Chrome 和 ChromeOS 版 Chrome 尚不支持使用基础模型的 API。</blockquote>
+      <p class="note">所以你在安卓的 <code>chrome://flags</code> 里翻不到 <code>#prompt-api-for-gemini-nano</code> —— 这条路目前在手机上根本不存在，别为它去刷机、换浏览器或者装「AI 加速包」。<br>另外提醒一句：<code>LanguageModel</code> 只在 https / localhost / file 这类安全上下文里暴露。如果此刻是用 <code>http://192.168.x.x</code> 从电脑上连过来看的，那属于「上下文不安全」，不是「你这台设备不行」。</p>
+      <p class="src">出处：<a href="https://developer.chrome.com/docs/ai/prompt-api" target="_blank" rel="noopener">developer.chrome.com/docs/ai/prompt-api</a></p>
+    </div>
+
+    <div class="actions">
+      <button class="primary" data-gate="retry">我按步骤开好了：重新检测</button>
+      <button data-gate="fake">先看看界面长什么样（桩模式 · 不调用任何模型）</button>
+      <button data-gate="download" id="gateDownload" hidden>替它省点时间：现在触发下载</button>
+      <button class="link" id="gateLetter">✉ 读读 Google 想对你说的话</button>
+    </div>
+
+    <p class="note" id="gatePollNote" style="margin:14px 0 0">这一页每 15 秒会重新问一次状态，问到模型就绪就自己让开 —— 说到做到，这一条不像某家公司。</p>
+
+    <p class="foot">这一屏里唯一能查得到确切数字的东西，是它自己占的那点本地存储 —— 因为那是唯一一件事先问过你的。</p>
+  </div>
+</div>
 <div id="app">
   <aside id="sidebar">
     <div class="brand">FUCK GOOGLE<span>自愿安装 · Silent Install Champion</span></div>
@@ -975,42 +1062,93 @@ function updatePill() {
   $('input').disabled = backend.name === 'chrome' && backend.state !== 'available';
   refreshSendState();
   renderNotice();
+  applyGate();
 }
 
+/* 顶栏提示条只保留桩模式那一句：available 以外的状态已经没有聊天界面可站，
+   那些教程和按钮整体搬到全屏页 #gate 上了。 */
 function renderNotice() {
   const n = $('notice');
-  const st = backend.state;
-  if (backend.name === 'stub') {
-    n.className = 'show';
-    n.innerHTML = `<b>桩模式</b>：当前没有调用任何模型，这是内置的假回复，用来检验界面、流式渲染和本地保存。去掉地址栏里的 <code>?fake=1</code> 即为真实模型。`;
-    return;
-  }
-  if (st === 'available') { n.className = ''; n.innerHTML = ''; return; }
+  if (backend.name !== 'stub') { n.className = ''; n.innerHTML = ''; return; }
+  n.className = 'show';
+  n.innerHTML = `<b>桩模式</b>：当前没有调用任何模型，这是内置的假回复，用来检验界面、流式渲染和本地保存。去掉地址栏里的 <code>?fake=1</code> 即为真实模型。`;
+}
 
-  const steps = `<div class="steps">
-      1. 地址栏打开 <code>chrome://flags</code><br>
-      2. 搜索并设为 <b>Enabled</b>：<code>#optimization-guide-on-device-model</code>、<code>#prompt-api-for-gemini-nano</code><br>
-      3. 重启 Chrome；模型会自动下载，本页顶部会出现进度条<br>
-      4. 仍不可用则看 <code>chrome://on-device-internals</code>，企业策略 <code>BuiltInAIDisallowed</code> 也会直接关掉它
-    </div>`;
+/* ---------- 全屏「恭喜」页 ---------- */
+const GATE_FORCE = params.get('gate');        // 仅开发/演示：?gate=missing|unavailable|downloadable|downloading|unknown
+const IS_TOUCH_NO_SUPPORT = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const GATE_TEXT = {
+  checking:     ['busy', '正在看你硬盘上有什么…', '这一问它不会告诉你答案的，稍等。'],
+  missing:      ['bad', '这个浏览器压根没暴露 <code>LanguageModel</code>', ''],
+  unavailable:  ['bad', 'API 在，服务没跑', '实测报错：<code>NotSupportedError: the service is not running</code>。你的硬盘暂时安全。'],
+  downloadable: ['warn', '模型已经排好队，就等你不注意', '几百 MB，走 Google 的分发地址，用的是你的流量。你可以现在触发它，也可以继续装不知道。'],
+  downloading:  ['warn busy', '它正在偷偷下载', '别一直盯着任务管理器，那样反而会打断它。下完这一页自己会让开。'],
+  unknown:      ['warn', '状态读不出来', '浏览器既不承认有，也不说没有。按下面三步开完再回来点「重新检测」。'],
+};
+let lastProgress = 0;
+/* 这一页唯一会去碰模型的按钮：为了触发下载，必须真的建一个会话。
+   它不进主会话的记账（mirroredIds），用完立刻 destroy —— 留下一个不被需要的会话挂在内存里，
+   就和这页在骂的东西没区别了。 */
+let gateProbe = null;
+async function dropGateProbe() {
+  const s = gateProbe; gateProbe = null;
+  if (!s) return;
+  try { await s.destroy(); console.info('[fca] 触发下载的临时会话已销毁'); } catch {}
+}
+
+function setGateProgress(p) {
+  lastProgress = Math.max(0, Math.min(100, p | 0));
+  const bar = $('gateProg');
+  bar.style.display = 'block';
+  bar.firstElementChild.style.width = lastProgress + '%';
+}
+
+function applyGate() {
+  const st = GATE_FORCE || backend.state;
+  const [cls, head, why] = GATE_TEXT[st] || GATE_TEXT.unknown;
+  $('gateDot').className = 'dot ' + cls;
+  $('gateStateText').innerHTML = head;
+
+  let body = why;
   if (st === 'missing') {
-    n.className = 'show';
-    n.innerHTML = `<b>这个浏览器还没被塞东西：</b>压根没暴露 <code>LanguageModel</code>。它需要 Chrome 138+ 且 flag 开启 —— 换句话说，这次得你亲手同意，有点反常。` + steps +
-      `<div class="row"><button data-retry>重新检测</button><button data-fake>用桩模式试界面</button></div>`;
-  } else if (st === 'downloading') {
-    n.className = 'show';
-    n.innerHTML = `<b>它正在偷偷下载。</b>别一直盯着任务管理器，那样反而会打断它。下载完成后本页自动可用。` +
-      `<div id="progress"><i></i></div>`;
-  } else if (st === 'downloadable') {
-    n.className = 'show';
-    n.innerHTML = `<b>模型已经排好队，就等你不注意。</b>你也可以主动触发它 —— 几百 MB，走 Google 分发地址，用的是你的流量。` +
-      `<div class="row"><button data-download>替它省点时间：现在下载</button><button data-retry>重新检测</button></div>`;
+    body = IS_TOUCH_NO_SUPPORT
+      ? 'Google 没把这条路开到手机上 —— 见下面第二块，不是你没开。'
+      : '它需要桌面版 Chrome 138+ 且两个 flag 开启。换句话说，这次得你亲手同意，有点反常。';
+  }
+  if (st === 'unavailable' && IS_TOUCH_NO_SUPPORT) {
+    body = 'API 露了个脸，服务却没跑。在手机上这基本等于「这条路本来就没给移动端开」（见下面第二块），不是你配置错了。';
+  }
+  if (!window.isSecureContext) {
+    body += (body ? '<br>' : '') +
+      `还有一点：<code>${esc(location.protocol)}//${esc(location.host)}</code> 不是安全上下文，<b>即使设备支持，这个 API 也不会暴露</b>。换成 https 或 localhost 再判。`;
+  }
+  $('gateWhy').innerHTML = body;
+
+  $('gateMobile').hidden = !IS_TOUCH_NO_SUPPORT;
+  $('gateDesktop').hidden = IS_TOUCH_NO_SUPPORT;
+  $('gateDownload').hidden = st !== 'downloadable';
+  $('gatePollNote').hidden = !['downloading', 'downloadable', 'unavailable'].includes(st);
+  if (st === 'downloading') setGateProgress(GATE_FORCE ? 37 : lastProgress);   // 强制演示时给个假刻度，标着「演示」
+  else $('gateProg').style.display = 'none';
+  if (st === 'downloading' && GATE_FORCE) $('gateStateText').innerHTML = head + ' <span style="color:var(--fg-faint)">（?gate 演示，非真实进度）</span>';
+
+  if (st === 'available') {
+    if (document.body.classList.contains('gated')) {
+      document.body.classList.remove('gated');
+      const app = $('app');
+      app.classList.add('unlock');
+      setTimeout(() => app.classList.remove('unlock'), 600);
+      console.info('[fca] 模型 available，全屏页已让开');
+      dropGateProbe();
+    }
   } else {
-    n.className = 'show';
-    n.innerHTML = `<b>这次它没塞进来</b>（实测报错：<code>NotSupportedError: the service is not running</code>）。你的硬盘暂时安全。想体验被塞满的感觉，按下面三步。` + steps +
-      `<div class="row"><button data-retry>重新检测</button><button data-fake>用桩模式试界面</button></div>`;
+    document.body.classList.add('gated');       // 任何非 available 状态，原界面一律不入镜
   }
 }
+
+/* 轮询交给 boot 里那条已有的 15 秒定时器（downloading / downloadable / unavailable 时才动），
+   这里不再另开一条：多一条后台 availability() 就多一次「不打招呼就去问」的机会，
+   而这页全程在骂的正是这个。文案里把这条轮询明明白白写给用户看。 */
 
 function refreshSendState() {
   const c = activeConv();
@@ -1299,18 +1437,42 @@ $('thread').addEventListener('click', (e) => {
   const chip = e.target.closest('.chip'); if (!chip) return;
   input.value = chip.dataset.q; autoGrow(); refreshSendState(); input.focus();
 });
-$('notice').addEventListener('click', async (e) => {
-  if (e.target.closest('[data-retry]')) { toast('重新检测中…'); await backend.refresh(); updatePill(); }
-  if (e.target.closest('[data-fake]')) { location.search = '?fake=1'; }
-  if (e.target.closest('[data-download]')) {
-    toast('已触发模型下载');
+/* 全屏页的出口：重新检测 / 桩模式 / 手动触发下载 */
+$('gate').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-gate]'); if (!b) return;
+  const act = b.dataset.gate;
+  if (act === 'retry') {
+    b.disabled = true; const label = b.textContent; b.textContent = '检测中…';
+    try { await backend.refresh(); updatePill(); if (backend.state !== 'available') toast('还是没有：' + backend.state, 2600); }
+    finally { b.disabled = false; b.textContent = label; }
+  } else if (act === 'fake') {
+    location.search = '?fake=1';
+  } else if (act === 'download') {
+    if (typeof backend._create !== 'function') {   // ?fake=1&gate=downloadable 的开发组合
+      toast('桩模式背后没有真模型，没什么可下载的', 2600);
+      return;
+    }
+    b.disabled = true; b.textContent = '已触发，正在走它自己的下载通道…';
     try {
-      await backend._create([{ role: 'system', content: 'ready' }], new AbortController().signal);
-      backend.onProgress = (p) => { const b = $('progress'); if (b) { b.style.display = ''; b.firstElementChild.style.width = p + '%'; } };
+      const s = await backend._create([{ role: 'system', content: 'ready' }], new AbortController().signal);
+      gateProbe = s;
+      if (s && typeof s.addEventListener === 'function') {
+        s.addEventListener('downloadprogress', (ev) => {
+          backend.state = 'downloading';
+          setGateProgress(Math.round(((ev && ev.progress) || 0) * 100));
+          updatePill();
+        });
+      }
       await backend.refresh(); updatePill();
-    } catch (err) { toast('触发失败：' + err.message, 3000); }
+    } catch (err) {
+      toast('触发失败：' + err.message, 3200);
+      b.disabled = false; b.textContent = '替它省点时间：现在触发下载';
+    } finally {
+      await dropGateProbe();          // 只是敲门，门开了就该把这只手收回去
+    }
   }
 });
+$('gateLetter').addEventListener('click', () => $('letter').classList.add('open'));
 
 /* 滚动：用户往上翻时不再自动吸底 */
 $('thread').addEventListener('scroll', () => {
@@ -1361,11 +1523,12 @@ function bindSetting(id, valId, key, fmt) {
 
   renderSidebar(); renderThread(); autoGrow(); updatePill(); renderBill();
 
+  /* 窄屏默认收侧栏：#gate 那个「先看看界面」的出口会把手机用户送到这里，
+     侧栏摊开会把聊天挤成横向滚动 —— 聊天界面不为手机精调，但至少别漏出去。 */
+  if (innerWidth <= 720) $('sidebar').classList.add('hidden');
+
   if (backend.refresh) { await backend.refresh(); updatePill(); }
-  backend.onProgress = (p) => {
-    const b = $('progress'); if (b) { b.style.display = ''; b.firstElementChild.style.width = p + '%'; }
-    updatePill();
-  };
+  backend.onProgress = (p) => { setGateProgress(p); updatePill(); };
 
   // 下载期间轮询状态，下完自动转「就绪」
   setInterval(async () => {
