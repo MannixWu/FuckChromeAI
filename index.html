@@ -160,6 +160,9 @@ pre.block code { display:block; padding:12px 14px; overflow-x:auto; background:n
 #drawer h2 { font-size:14px; margin:0 0 14px; display:flex; justify-content:space-between; align-items:center; }
 .field { margin-bottom:18px; }
 .field label { display:block; font-size:12.5px; color:var(--fg-dim); margin-bottom:6px; }
+.field.check label { display:flex; align-items:center; gap:7px; margin-bottom:0; cursor:pointer; }
+.field.check input[type=checkbox] { width:14px; height:14px; accent-color:var(--accent); flex:0 0 auto; }
+.field.check .mini { color:var(--fg-faint); font-size:11.5px; }
 .field textarea { width:100%; height:110px; background:var(--bg-input); border:1px solid var(--line); border-radius:10px; padding:10px; outline:none; resize:vertical; }
 .field textarea:focus { border-color:var(--line-strong); }
 .field .range { display:flex; align-items:center; gap:10px; }
@@ -290,6 +293,9 @@ pre.block code { display:block; padding:12px 14px; overflow-x:auto; background:n
       <div class="field">
         <label for="ctxIn">历史上下文预算（估算 token）</label>
         <div class="range"><input type="range" id="ctxIn" min="512" max="8192" step="256"><span class="val" id="ctxVal">3072</span></div>
+      </div>
+      <div class="field check">
+        <label for="autoTitleIn"><input type="checkbox" id="autoTitleIn"> 首轮问答后自动起标题 <span class="mini">会让硬盘上那个模型多跑一次</span></label>
       </div>
       <div class="kv"><span>API</span><b id="kvApi">-</b></div>
       <div class="kv"><span>模型状态</span><b id="kvAvail">-</b></div>
@@ -520,8 +526,9 @@ const Store = {
     catch (e) { toast('本地存储写入失败（可能空间已满）', 2600); }
   },
   loadSettings() {
-    try { return Object.assign({ system: DEFAULT_SYSTEM, temperature: 0.7, maxTokens: 1024, ctxBudget: 3072 }, JSON.parse(localStorage.getItem(KEY.settings) || '{}')); }
-    catch { return { system: DEFAULT_SYSTEM, temperature: 0.7, maxTokens: 1024, ctxBudget: 3072 }; }
+    const base = { system: DEFAULT_SYSTEM, temperature: 0.7, maxTokens: 1024, ctxBudget: 3072, autoTitle: true };
+    try { return Object.assign(base, JSON.parse(localStorage.getItem(KEY.settings) || '{}')); }
+    catch { return base; }
   },
   saveSettings(s) { try { localStorage.setItem(KEY.settings, JSON.stringify(s)); } catch {} },
 };
@@ -728,6 +735,41 @@ class ChromeBackend {
     }
   }
 
+  /* 一次性标题会话。硬约束：绝不碰 this.session / this.mirroredIds / this.mode ——
+     那套记账是主会话 append 快路径的依据，把标题指令混进主会话，第二轮就会退化成
+     实测 6~22s 的 create() 重建，比没有标题糟得多。
+     失败/超时一律把异常抛给调用方，由它决定保留本地标题。 */
+  async titleOnce({ question, answer }) {
+    if (!this.LM) return null;
+    const sys = '你是标题生成器。读完用户提问和助手回答，输出一个中文短语概括这轮对话，' +
+      '格式是「一个 emoji + 不超过 8 个汉字」。只输出这一行：不要引号、标点、序号，也不要解释。';
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 15000);   // 只 abort 这个临时会话
+    let s = null;
+    try {
+      const opts = { signal: ac.signal, expectedInputs: [{ type: 'text' }] };
+      try {
+        s = await this.LM.create(Object.assign({}, opts, { messages: [{ role: 'system', content: sys }] }));
+      } catch (e) {
+        if (!(e instanceof TypeError)) throw e;
+        s = await this.LM.create(Object.assign({}, opts, { initialSystemPrompt: sys }));
+      }
+      const brief = `用户提问：${String(question).slice(0, 400)}\n\n助手回答（节选）：${String(answer).slice(0, 600)}\n\n请给出标题。`;
+      const callOpts = { signal: ac.signal, temperature: 0.3, maxTokens: 24 };
+      try {
+        return await s.prompt([{ role: 'user', content: brief }], callOpts);
+      } catch (e) {
+        if (!(e instanceof TypeError)) throw e;
+        return await s.prompt(brief, callOpts);          // 老形状：只吃字符串
+      }
+    } finally {
+      clearTimeout(timer);
+      try { ac.abort(); } catch {}
+      try { if (s && typeof s.destroy === 'function') s.destroy(); } catch {}
+      console.info('[fca] 临时标题会话已销毁');
+    }
+  }
+
   info() {
     const s = this.session;
     return {
@@ -779,6 +821,12 @@ class StubBackend {
       text += ch; onDelta(text); await sleep(12);
     }
     return text;
+  }
+  /* 桩模式也走整条标题链路；故意带书名号，顺便验证 cleanTitle 的清洗路径 */
+  async titleOnce({ question }) {
+    await sleep(400);
+    const key = String(question).replace(/\s+/g, '').slice(0, 7) || '对话';
+    return `「${key}」`;
   }
   info() { return { api: 'none（桩模式）', mode: 'fake', window: '-', usage: '-', state: 'available' }; }
   destroy() {}
@@ -1004,13 +1052,93 @@ const QUIPS = [
 ];
 const pickQuip = (ms) => QUIPS[Math.floor(Math.random() * QUIPS.length)]((ms / 1000).toFixed(1));
 
+/* =========================================================================
+ * 6.5 会话标题：本地规则先占位，模型在后台改写
+ * ========================================================================= */
+const TITLE_RULES = [
+  [/什么是|为什么|原理|区别|解释|入门|怎么理解|如何|怎么用/i, '📚'],
+  [/回文|算法|函数|代码|脚本|正则|排序|接口|api|java|python/i, '🧩'],
+  [/报错|异常|崩溃|失败|调试|error|bug|栈/i, '🐛'],
+  [/翻译|英文|中文|日文|术语|润色/i, '🌐'],
+  [/表格|数据|统计|分析|图表|csv|excel|指标/i, '📊'],
+  [/邮件|文案|公众号|小红书|写一|标题|措辞|方案书/i, '✍️'],
+  [/总结|摘要|提炼|要点|纪要/i, '📝'],
+  [/计划|清单|安排|选型|行程|对比/i, '🗂️'],
+  [/心情|安慰|无聊|陪聊|emo|建议/i, '🫧'],
+];
+const EMOJI_RE = /[\p{Extended_Pictographic}]/u;
+
+const localEmoji = (text) => {
+  for (const [re, e] of TITLE_RULES) if (re.test(text)) return e;
+  return '💬';
+};
+
+/* 占位标题：瞬时、零算力，同时是所有失败路径的最终标题 */
+const LEAD_FILLER = /^(?:麻烦|帮我|帮忙|给我|来一个|请你|请)+[，,、\s]*/;   // 「请帮我」这种连着剥干净
+function localTitle(text) {
+  let body = String(text).replace(/\s+/g, ' ').trim();
+  body = body.replace(LEAD_FILLER, '').trim() || body;   // 客套话不值得占侧栏那 14 个字
+  const cut = body.length > 14 ? body.slice(0, 14) + '…' : body;
+  return `${localEmoji(body)} ${cut}`;
+}
+
+/* 模型输出不可信（它写过死循环 markdown），标题同理：先清洗，不合格就判失败 */
+function cleanTitle(raw) {
+  if (!raw) return '';
+  let s = String(raw).split(/\r?\n/)[0].trim();
+  s = s.replace(/^(标题|题目|建议标题|题目建议)\s*[:：]?/i, '');
+  s = s.replace(/^[\s"'`「」『』【】《》（）()\-*#>+~]+/, '');
+  s = s.replace(/[\s"'`「」『』【】《》（）()\-*#>+~.。，,、:：;；!！?？]+$/g, '');
+  s = s.replace(/\*/g, '').trim();
+  /* 按码点数，不按 UTF-16 长度：emoji 占 2 个 code unit，用 length 会误判还会切坏它 */
+  const cps = Array.from(s);
+  if (cps.length < 3) return '';                          // 只剩 emoji / 一两个字符 → 不合格
+  if (cps.length > 30) return '';                         // 它开始写段落了 → 别用
+  if (cps.length > 20) s = cps.slice(0, 20).join('') + '…';  // 略长就截并标出来，别装作是个完整标题
+  if (/^(无法|抱歉|不能|不会|对不起|不好意思|sure|sorry|ok|okay|好的|嗯|标题|建议|当然)[:：!！。.\s]*$/i.test(s)) return '';
+  if (/^(无法|抱歉|不能|不会|对不起|不好意思)/.test(s)) return '';   // 开头就摆烂的，带 emoji 也不收
+  return s;
+}
+
+/* 只刷侧栏和顶栏标题，不调 renderThread —— 免得打断用户正在看的滚动位置 */
+function refreshTitleUI(c) {
+  renderSidebar();
+  if (c && c.id === App.activeId) $('chatTitle').textContent = c.title;
+}
+
+/* fire-and-forget：不 await，任何异常都吞掉，本地标题就是兜底 */
+async function generateTitle(convId, question, answer) {
+  const target = () => App.convs.find((x) => x.id === convId) || null;
+  let c = target();
+  if (!c || c.titleManual) return;
+  const t0 = performance.now();
+  let out = null;
+  try { out = await backend.titleOnce({ question, answer }); }
+  catch (e) { console.info('[fca] 标题生成未成功，保留本地标题：' + ((e && e.message) || e)); }
+  const ms = Math.round(performance.now() - t0);
+  c = target();                                        // 期间可能被删/被改名
+  if (!c || c.titleManual) return;
+  const base = cleanTitle(out);
+  if (base) {
+    c.title = EMOJI_RE.test(base) ? base : `${localEmoji(question)} ${base}`;
+    c.titleSrc = 'model';
+    console.info(`[fca] 标题 来源=model 耗时=${ms}ms 结果="${c.title}"`);
+    persist();
+    refreshTitleUI(c);
+  } else {
+    console.info(`[fca] 标题 来源=local 耗时=${ms}ms 结果="${c.title}"` +
+      (out ? `（模型返回不合格：${JSON.stringify(String(out).slice(0, 40))}）` : ''));
+  }
+}
+
 async function send(text) {
   text = (text || '').trim();
   if (!text || App.streaming) return;
   let c = activeConv(); if (!c) c = newConv();
+  const wasFirst = c.messages.length === 0;
 
   c.messages.push({ id: uid(), role: 'user', content: text, ts: now() });
-  if (c.title === '新对话') c.title = text.slice(0, 24) + (text.length > 24 ? '…' : '');
+  if (c.title === '新对话') c.title = localTitle(text);
   const reply = { id: uid(), role: 'assistant', content: '', ts: now() };
   c.messages.push(reply);
 
@@ -1052,6 +1180,11 @@ async function send(text) {
     if (App.raf) { cancelAnimationFrame(App.raf); App.raf = 0; }
     $('kvTime').textContent = ((now() - t0) / 1000).toFixed(1) + 's';
     renderThread(); persist(); refreshSendState(); updatePill(); scrollToBottom();
+    /* 首轮且回答没报错才起标题。不 await：界面此刻已经解锁，
+       标题晚几秒到无所谓，把输入框按住几秒才叫难受。 */
+    if (wasFirst && !reply.error && App.settings.autoTitle !== false && !c.titleManual) {
+      generateTitle(c.id, text, reply.content || '').catch((e) => console.info('[fca] 标题流程异常：' + ((e && e.message) || e)));
+    }
   }
 }
 
@@ -1135,7 +1268,7 @@ $('convList').addEventListener('dblclick', (e) => {
   const finish = () => {
     const c = App.convs.find((x) => x.id === row.dataset.id);
     const v = nameEl.textContent.trim();
-    if (c && v) { c.title = v; persist(); }
+    if (c && v) { c.title = v; c.titleManual = true; persist(); }   // 手动改过名 → 自动标题就此闭嘴
     nameEl.contentEditable = 'false'; renderSidebar(); renderThread();
   };
   nameEl.addEventListener('blur', finish, { once: true });
@@ -1219,6 +1352,11 @@ function bindSetting(id, valId, key, fmt) {
     App.settings.system = $('sysIn').value || DEFAULT_SYSTEM;
     Store.saveSettings(App.settings);
     if (backend._dropSession) backend._dropSession();
+  });
+  $('autoTitleIn').checked = App.settings.autoTitle !== false;
+  $('autoTitleIn').addEventListener('change', () => {
+    App.settings.autoTitle = $('autoTitleIn').checked;
+    Store.saveSettings(App.settings);
   });
 
   renderSidebar(); renderThread(); autoGrow(); updatePill(); renderBill();
