@@ -1376,11 +1376,25 @@ function localTitle(text) {
   return `${localEmoji(body)} ${cut}`;
 }
 
-/* 模型输出不可信（它写过死循环 markdown），标题同理：先清洗，不合格就判失败 */
+/* 模型输出不可信（它写过死循环 markdown），标题同理：先清洗，不合格就判失败。
+   逐行试：它经常先吐一句前言再给正文（实测吐过「好的，以下是一些可能的标题，方便你选择」），
+   第一条合格的就用，全不合格才回落到本地占位标题。 */
+const TITLE_META = /(以下是|下面是|这里有一些|一些可能的|几个可能的|可能的标题|标题如下|以下标题|我想到|希望.{0,8}(帮助|满意|有用)|方便你选择|供你(选择|参考))/;
+const TITLE_POLITE = /^(当然可以|好的|好呀|嗯+|当然|没问题|可以|收到|明白|行)[！!，,、.\s]/;
 function cleanTitle(raw) {
   if (!raw) return '';
-  let s = String(raw).split(/\r?\n/)[0].trim();
+  const lines = String(raw).split(/\r?\n/);
+  for (let i = 0; i < lines.length && i < 6; i++) {   // 只看前 6 行：再多就是在写文章了
+    const s = cleanTitleLine(lines[i]);
+    if (s) return s;
+  }
+  return '';
+}
+function cleanTitleLine(line) {
+  let s = String(line).trim();
+  if (!s) return '';
   s = s.replace(/^(标题|题目|建议标题|题目建议)\s*[:：]?/i, '');
+  s = s.replace(/^\d+[.)、]\s*/, '');                     // 「1. 词频统计」这种候选列表
   s = s.replace(/^[\s"'`「」『』【】《》（）()\-*#>+~]+/, '');
   s = s.replace(/[\s"'`「」『』【】《》（）()\-*#>+~.。，,、:：;；!！?？]+$/g, '');
   s = s.replace(/\*/g, '').trim();
@@ -1388,9 +1402,11 @@ function cleanTitle(raw) {
   const cps = Array.from(s);
   if (cps.length < 3) return '';                          // 只剩 emoji / 一两个字符 → 不合格
   if (cps.length > 30) return '';                         // 它开始写段落了 → 别用
-  if (cps.length > 20) s = cps.slice(0, 20).join('') + '…';  // 略长就截并标出来，别装作是个完整标题
+  if (TITLE_META.test(s)) return '';                      // 在描述自己要做的事，不是标题
+  if (TITLE_POLITE.test(s)) return '';                    // 开头是客套话 + 标点，同上
   if (/^(无法|抱歉|不能|不会|对不起|不好意思|sure|sorry|ok|okay|好的|嗯|标题|建议|当然)[:：!！。.\s]*$/i.test(s)) return '';
   if (/^(无法|抱歉|不能|不会|对不起|不好意思)/.test(s)) return '';   // 开头就摆烂的，带 emoji 也不收
+  if (cps.length > 20) return cps.slice(0, 20).join('') + '…';      // 略长就截并标出来，别装作是个完整标题
   return s;
 }
 
