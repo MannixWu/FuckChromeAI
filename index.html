@@ -1140,6 +1140,9 @@ function applyGate() {
       setTimeout(() => app.classList.remove('unlock'), 600);
       console.info('[fca] 模型 available，全屏页已让开');
       dropGateProbe();
+      /* 解锁这一刻补做依赖可见性的测量：输入框高度（autoGrow 在隐藏时量到 0）和吸底位置 */
+      autoGrow();
+      App.pinned = true; scrollToBottom(true);
     }
   } else {
     document.body.classList.add('gated');       // 任何非 available 状态，原界面一律不入镜
@@ -1340,7 +1343,14 @@ async function regenerate() {
  * 7. 事件绑定
  * ========================================================================= */
 const input = $('input');
-function autoGrow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 200) + 'px'; }
+/* 拦截页期间 #app 是 display:none，这时量 scrollHeight 得到 0，写回去就把输入框压成一条缝
+   （刷新后「placeholder 沉下去了，打一个字才回来」就是这么来的）。
+   量不到就不写高度，等解锁那一刻再补一次。 */
+function autoGrow() {
+  if (!input.offsetParent) return;
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+}
 
 input.addEventListener('input', () => { autoGrow(); refreshSendState(); });
 input.addEventListener('keydown', (e) => {
