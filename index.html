@@ -288,7 +288,7 @@ body.gated #gate { display:block; }
   <div class="card">
     <div class="badge">G</div>
     <h1>恭喜，这次它没能塞进来</h1>
-    <p class="sub">这台设备上没有一个几百 MB 的模型是在你没点头的情况下落地的。这种事换作别家会开弹窗、发公告、请你点「稍后」—— Google 的选择是干脆不提。你现在看到的这一屏，就是它没做到的那部分。</p>
+    <p class="sub">这台设备上没有一个 4 GB 的模型是在你没点头的情况下落地的。这种事换作别家会开弹窗、发公告、请你点「稍后」—— Google 的选择是干脆不提。你现在看到的这一屏，就是它没做到的那部分。</p>
 
     <div class="state"><span class="dot" id="gateDot"></span><b id="gateStateText">正在看你硬盘上有什么…</b></div>
     <p class="why" id="gateWhy"></p>
@@ -361,13 +361,14 @@ body.gated #gate { display:block; }
         </div>
         <div class="bill">
           <div class="bill-h">本次「自愿安装」账单</div>
-          <div class="bill-row"><span>模型占用你的磁盘</span><b>无法得知 · 没有查询接口</b></div>
+          <div class="bill-row"><span>模型占用你的磁盘</span><b class="bad" title="本机实测：User Data/OptGuideOnDeviceModel/2025.8.8.1141/weights.bin = 4,269,932,544 字节">4.27 GB · 一个 weights.bin</b></div>
+          <div class="bill-row"><span>这个数字它主动告诉过你吗</span><b class="bad">没有 · 网页 API 查不到</b></div>
           <div class="bill-row"><span>下载用掉的流量</span><b>无法得知 · 没有查询接口</b></div>
           <div class="bill-row"><span>它静默更新过几次</span><b>无法得知 · 没有查询接口</b></div>
           <div class="bill-row"><span>你收到的事前告知</span><b class="bad">0 次</b></div>
           <div class="bill-row"><span>你给出的明确同意</span><b class="bad">查无此条</b></div>
           <div class="bill-row"><span>本页面占用你的存储</span><b id="billLocal">计算中…</b></div>
-          <div class="bill-foot">六行里只有最后一行查得到 —— 因为它是我自己写的。讽刺的是，这一行才是唯一一个你点头同意的。<button id="openLetter">读读 Google 想对你说的话 →</button></div>
+          <div class="bill-foot">七行里查得到的只有两行：那 4.27 GB 得你自己去硬盘上翻（或者开 <code>chrome://on-device-internals</code>），最后一行是我自己写的 —— 讽刺的是，只有后面这一件你点过头。<button id="openLetter">读读 Google 想对你说的话 →</button></div>
         </div>
       </div>
     </div>
@@ -1240,7 +1241,7 @@ const GATE_TEXT = {
   checking:     ['busy', '正在看你硬盘上有什么…', '这一问它不会告诉你答案的，稍等。'],
   missing:      ['bad', '这个浏览器压根没暴露 <code>LanguageModel</code>', ''],
   unavailable:  ['bad', 'API 在，服务没跑', '实测报错：<code>NotSupportedError: the service is not running</code>。你的硬盘暂时安全。'],
-  downloadable: ['warn', '模型已经排好队，就等你不注意', '几百 MB，走 Google 的分发地址，用的是你的流量。你可以现在触发它，也可以继续装不知道。'],
+  downloadable: ['warn', '模型已经排好队，就等你不注意', '4 GB 一个 <code>weights.bin</code>，走 Google 的分发地址，用的是你的流量。你可以现在触发它，也可以继续装不知道。'],
   downloading:  ['warn busy', '它正在偷偷下载', '别一直盯着任务管理器，那样反而会打断它。下完这一页自己会让开。'],
   unknown:      ['warn', '状态读不出来', '浏览器既不承认有，也不说没有。按下面三步开完再回来点「重新检测」。'],
 };
@@ -1345,7 +1346,7 @@ const QUIPS = [
   () => `磁盘是它的，电费是你的`,
   () => `零次弹窗，好评`,
   () => `没人通知你它在跑，也没人问过你`,
-  () => `回答完它还会继续占着你几百 MB`,
+  () => `回答完它还会继续占着你 4 GB`,
   () => `同意书？没有那玩意儿`,
   () => `下次更新它依然不需要你点头`,
   () => `你甚至不知道它版本几`,
