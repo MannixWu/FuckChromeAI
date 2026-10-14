@@ -12,6 +12,8 @@
   --bg-input:#212121; --bg-bubble:#2f2f2f; --bg-code:#1a1a1a;
   --fg:#ececec; --fg-dim:#a0a0a0; --fg-faint:#6b6b6b;
   --line:#2a2a2a; --line-strong:#3a3a3a; --accent:#10a37f; --danger:#e5484d;
+  --tok-kw:#e06c8b; --tok-str:#8fd0a0; --tok-com:#7d8a82; --tok-num:#d8a657; --tok-bool:#c792ea;
+  --tok-fn:#79b8ff; --tok-tag:#79b8ff; --tok-attr:#d8a657; --tok-key:#79b8ff; --tok-re:#8fd0a0; --tok-var:#e06c8b;
   --shadow:0 8px 28px rgba(0,0,0,.45);
 }
 :root[data-theme="light"] {
@@ -19,6 +21,8 @@
   --bg-input:#f4f4f4; --bg-bubble:#e8e8e8; --bg-code:#f6f6f6;
   --fg:#1f1f1f; --fg-dim:#5c5c5c; --fg-faint:#9a9a9a;
   --line:#e5e5e5; --line-strong:#d5d5d5; --accent:#10a37f; --danger:#d93025;
+  --tok-kw:#b4045a; --tok-str:#0a6b3b; --tok-com:#5b665f; --tok-num:#8a5a00; --tok-bool:#6b2fb5;
+  --tok-fn:#0b5fa5; --tok-tag:#0b5fa5; --tok-attr:#8a5a00; --tok-key:#0b5fa5; --tok-re:#0a6b3b; --tok-var:#b4045a;
   --shadow:0 8px 28px rgba(0,0,0,.10);
 }
 * { box-sizing:border-box; }
@@ -124,6 +128,15 @@ pre.block .bar { display:flex; align-items:center; justify-content:space-between
 pre.block .bar button { color:var(--fg-faint); font-size:11.5px; padding:2px 6px; border-radius:6px; }
 pre.block .bar button:hover { color:var(--fg); background:var(--bg-hover); }
 pre.block code { display:block; padding:12px 14px; overflow-x:auto; background:none; border:0; font-family:ui-monospace,Consolas,"Cascadia Mono",monospace; font-size:13px; line-height:1.6; white-space:pre; }
+/* 高亮色：只给颜色不改字重，代码密度本来就高，加粗会更容易看花 */
+pre.block code .t-kw { color:var(--tok-kw); }
+pre.block code .t-str, pre.block code .t-re { color:var(--tok-str); }
+pre.block code .t-com { color:var(--tok-com); font-style:italic; }
+pre.block code .t-num { color:var(--tok-num); }
+pre.block code .t-bool { color:var(--tok-bool); }
+pre.block code .t-fn, pre.block code .t-tag, pre.block code .t-key { color:var(--tok-fn); }
+pre.block code .t-attr { color:var(--tok-attr); }
+pre.block code .t-var { color:var(--tok-var); }
 
 /* 空状态 */
 #empty { max-width:760px; margin:0 auto; padding:8vh 20px 0; text-align:center; }
@@ -482,6 +495,146 @@ function estTokens(text) {
 }
 
 /* =========================================================================
+ * 1.5 代码块语法高亮：零依赖、单遍扫描、先分词后转义
+ *     不引 highlight.js —— 这页骂的就是「没打招呼往下拉几百 KB」，
+ *     而且它必须能在 file:// 离线打开时照常工作。
+ *     顺序很关键：对原始代码分词，每个 token 自己 esc() 之后再包 span。
+ *     反过来（先转义再分词）会把 &quot; 里的 & 当成语法字符，还等于自己开注入口子。
+ * ========================================================================= */
+const HL = (() => {
+  const ALIAS = {
+    javascript: 'js', jsx: 'js', mjs: 'js', cjs: 'js', node: 'js',
+    typescript: 'ts', tsx: 'ts',
+    python: 'py',
+    sh: 'bash', shell: 'bash', zsh: 'bash', console: 'bash', powershell: 'bash', ps1: 'bash',
+    xml: 'html', svg: 'html', vue: 'html',
+  };
+  const norm = (lang) => {
+    const k = String(lang || 'text').toLowerCase();
+    return ALIAS[k] || k;
+  };
+  const rule = (cls, re, when) => ({ cls, re, when });
+
+  /* 正则字面量 vs 除号：只有上一个非空白字符「正在开启一个值」时，斜杠才是正则。
+     判反的话 width / 2; // 注释 里的 `/ 2; /` 会被当成正则整段吃掉。 */
+  const REGEX_PREV = new Set(['', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '~', '^', '<', '>', '@']);
+  const REGEX_KW = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'do', 'else', 'case', 'void', 'delete', 'yield', 'await']);
+  const regexAllowed = (st) => (st.kw ? REGEX_KW.has(st.kw) : REGEX_PREV.has(st.prev));
+
+  const JS_KW = 'const|let|var|function|class|extends|super|this|return|if|else|for|while|do|switch|case|break|continue|new|delete|typeof|instanceof|in|of|void|await|async|yield|try|catch|finally|throw|import|export|default|from|as|static|get|set';
+  const TS_KW = JS_KW + '|type|interface|enum|implements|public|private|protected|readonly|namespace|declare|abstract|satisfies|keyof|infer';
+  const NUM = /\b0[xX][0-9a-fA-F]+\b|\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/y;
+  const RULES = {
+    js: [
+      rule('t-com', /\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$)/y),
+      rule('t-str', /`(?:[^`\\\n]|\\[\s\S])*`?|"(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?/y),
+      rule('t-re', /\/(?![/*])(?:\\.|\\\/|\[[^\]\n]*\]|[^/\\\n])+\/[dgimsuvy]*/y, regexAllowed),
+      rule('t-bool', /\b(?:true|false|null|undefined|NaN|Infinity)\b/y),
+      rule('t-kw', new RegExp('\\b(?:' + JS_KW + ')\\b', 'y')),
+      rule('t-num', NUM),
+      rule('t-fn', /[A-Za-z_$][\w$]*(?=\s*\()/y),
+      rule('', /[^A-Za-z0-9_$'"`/]+/y),
+    ],
+    py: [
+      rule('t-com', /#[^\n]*/y),
+      rule('t-str', /[rRbBuUfF]{0,2}(?:"""[\s\S]*?(?:"""|$)|'''[\s\S]*?(?:'''|$)|"(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?)/y),
+      rule('t-bool', /\b(?:True|False|None)\b/y),
+      rule('t-kw', /\b(?:def|return|if|elif|else|for|while|in|not|and|or|is|class|import|from|as|with|try|except|finally|raise|lambda|yield|global|nonlocal|assert|pass|break|continue|async|await|self|print)\b/y),
+      rule('t-num', NUM),
+      rule('t-fn', /[A-Za-z_]\w*(?=\s*\()/y),
+      rule('', /[^A-Za-z0-9_'"#]+/y),
+    ],
+    json: [
+      rule('t-key', /"(?:[^"\\\n]|\\.)*"(?=\s*:)/y),
+      rule('t-str', /"(?:[^"\\\n]|\\.)*"?/y),
+      rule('t-bool', /\b(?:true|false|null)\b/y),
+      rule('t-num', /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/y),
+      rule('', /[^A-Za-z0-9_"-]+/y),
+    ],
+    bash: [
+      rule('t-com', /#[^\n]*/y),
+      rule('t-str', /"(?:[^"\\\n]|\\.)*"?|'[^'\n]*'?/y),
+      rule('t-var', /\$\{[^}]*\}|\$[A-Za-z_]\w*/y),
+      rule('t-kw', /\b(?:if|then|else|elif|fi|for|while|until|do|done|case|esac|function|return|in|export|source|alias|unset|echo|cd|set|sudo|apt|brew|npm|pnpm|yarn|node|python|pip|git|curl|wget|docker|kubectl|ls|cat|grep|sed|awk|find|mv|cp|rm|chmod|mkdir)\b/y),
+      rule('t-num', NUM),
+      rule('', /[^A-Za-z0-9_$'"#-]+/y),
+    ],
+    css: [
+      rule('t-com', /\/\*[\s\S]*?(?:\*\/|$)/y),
+      rule('t-str', /"(?:[^"\\\n]|\\.)*"?|'(?:[^'\\\n]|\\.)*'?/y),
+      rule('t-kw', /@[\w-]+|[A-Za-z-]+(?=\s*:)/y),
+      rule('t-num', /#[0-9a-fA-F]{3,8}\b|-?\d*\.?\d+(?:px|em|rem|%|s|ms|vh|vw|deg)?\b/y),
+      rule('', /[^A-Za-z0-9_'"#@-]+/y),
+    ],
+    html: [
+      rule('t-com', /<!--[\s\S]*?(?:-->|$)/y),
+      rule('t-tag', /<\/?[A-Za-z][\w:.-]*|\/?>/y),
+      rule('t-str', /"[^"\n]*"?|'[^'\n]*'?/y),
+      rule('t-attr', /[A-Za-z_:][\w:.-]*(?=\s*=)/y),
+      rule('', /[^A-Za-z0-9_'"<&]+/y),
+    ],
+  };
+  /* ts 只有关键字表不同，其余规则共用（sticky 正则只在同步单线程里用，共享安全） */
+  RULES.ts = RULES.js.map((r) => (r.cls === 't-kw' ? rule('t-kw', new RegExp('\\b(?:' + TS_KW + ')\\b', 'y')) : r));
+
+  function scan(code, rules) {
+    const st = { prev: '', kw: '' };
+    let out = '', i = 0;
+    const n = code.length;
+    while (i < n) {
+      let hit = null;
+      for (const r of rules) {
+        if (r.when && !r.when(st)) continue;
+        r.re.lastIndex = i;
+        const m = r.re.exec(code);
+        if (m && m[0]) { hit = { r, text: m[0] }; break; }
+      }
+      if (!hit) {
+        const ch = code[i++];
+        if (!/\s/.test(ch)) { st.prev = ch; st.kw = ''; }
+        out += esc(ch);
+        continue;
+      }
+      const cls = hit.r.cls;
+      out += cls ? '<span class="' + cls + '">' + esc(hit.text) + '</span>' : esc(hit.text);
+      const tail = hit.text.replace(/\s+$/, '');
+      if (tail) { st.prev = tail[tail.length - 1]; st.kw = cls === 't-kw' ? hit.text : ''; }
+      i += hit.text.length;
+    }
+    return out;
+  }
+
+  /* 流式时每帧都重渲染整条回答：只有最后那个未闭合的块在变，
+     前面的块必须命中缓存，否则每帧都要把整段代码从头重扫一遍。 */
+  const CACHE = new Map();
+  const SEP = String.fromCharCode(0);
+  const CACHE_MAX_CHARS = 40000;
+  const CACHE_MAX_ITEMS = 160;
+
+  function highlight(code, lang) {
+    const text = code == null ? '' : String(code);
+    if (!text) return '';
+    const name = norm(lang);
+    const key = name + SEP + text;
+    const hit = CACHE.get(key);
+    if (hit !== undefined) return hit;
+    let out;
+    try {
+      const rules = RULES[name];
+      out = rules ? scan(text, rules) : esc(text);   // 没规则的语言 = 老老实实转义，不猜
+    } catch (e) {
+      out = esc(text);                               // 扫描器出岔子也不能让代码块变空白
+    }
+    if (text.length <= CACHE_MAX_CHARS) {
+      if (CACHE.size >= CACHE_MAX_ITEMS) CACHE.clear();
+      CACHE.set(key, out);
+    }
+    return out;
+  }
+
+  return { highlight, stats: () => ({ cached: CACHE.size }) };
+})();
+/* =========================================================================
  * 1. 极简 Markdown 渲染（零依赖，可离线 file:// 使用）
  *    策略：先整体转义，再按块解析，链接仅放行 http/https/mailto
  * ========================================================================= */
@@ -533,7 +686,7 @@ const MD = (() => {
         i++;
         while (i < lines.length && !new RegExp('^\\s*' + (mark === '`' ? '```' : '~~~')).test(lines[i])) buf.push(lines[i++]);
         i++;
-        out += codeBlock(lang, esc(buf.join('\n')));
+        out += codeBlock(lang, HL.highlight(buf.join('\n'), lang));
         continue;
       }
       if (/^\s*$/.test(line)) { flushPara(); i++; continue; }
