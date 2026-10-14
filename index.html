@@ -30,6 +30,10 @@ html, body { height:100%; margin:0; }
 body {
   font:15px/1.7 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
   background:var(--bg); color:var(--fg); overflow:hidden;
+  /* 中文字体没有斜体字面，浏览器靠合成倾斜硬拉，中文会发糊。
+     关掉合成斜体之后：有真斜体字面的（英文、Consolas 之类）照常斜，中文自动站直。
+     实测过：font-synthesis-oblique 这个写法 Chrome 不认，要用 -style。 */
+  font-synthesis-style:none;
 }
 button { font:inherit; color:inherit; background:none; border:0; cursor:pointer; }
 textarea, input { font:inherit; color:inherit; }
@@ -128,10 +132,12 @@ pre.block .bar { display:flex; align-items:center; justify-content:space-between
 pre.block .bar button { color:var(--fg-faint); font-size:11.5px; padding:2px 6px; border-radius:6px; }
 pre.block .bar button:hover { color:var(--fg); background:var(--bg-hover); }
 pre.block code { display:block; padding:12px 14px; overflow-x:auto; background:none; border:0; font-family:ui-monospace,Consolas,"Cascadia Mono",monospace; font-size:13px; line-height:1.6; white-space:pre; }
-/* 高亮色：只给颜色不改字重，代码密度本来就高，加粗会更容易看花 */
+/* 高亮色：只给颜色不改字重，代码密度本来就高，加粗会更容易看花。
+   注释不给 italic：body 已经关了合成斜体，中文本来就不会糊，但真斜体字面的英文还是会斜 ——
+   一行「@param {string} text 要统计的文本」半斜半直比整行站直更乱，所以注释统一只靠颜色。 */
 pre.block code .t-kw { color:var(--tok-kw); }
 pre.block code .t-str, pre.block code .t-re { color:var(--tok-str); }
-pre.block code .t-com { color:var(--tok-com); font-style:italic; }
+pre.block code .t-com { color:var(--tok-com); }
 pre.block code .t-num { color:var(--tok-num); }
 pre.block code .t-bool { color:var(--tok-bool); }
 pre.block code .t-fn, pre.block code .t-tag, pre.block code .t-key { color:var(--tok-fn); }
